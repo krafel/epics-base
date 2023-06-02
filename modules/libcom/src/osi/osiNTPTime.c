@@ -39,6 +39,7 @@
 
 
 static struct {
+    int             timeProvider;
     int             synchronize;
     int             synchronized;
     epicsEventId    loopEvent;
@@ -89,8 +90,10 @@ static void ShutdownCallFunc(const iocshArgBuf *args)
 
 static void NTPTime_InitOnce(void *pprio)
 {
+    int prio = *(int *)pprio;
     struct timespec timespecNow;
 
+    NTPTimePvt.timeProvider   = prio != NTP_TIME_DISABLE_TIME_PROVIDER;
     NTPTimePvt.synchronize    = 1;
     NTPTimePvt.synchronized   = 0;
     NTPTimePvt.loopEvent      = epicsEventMustCreate(epicsEventEmpty);
@@ -123,7 +126,16 @@ static void NTPTime_InitOnce(void *pprio)
     iocshRegister(&ShutdownFuncDef, ShutdownCallFunc);
 
     /* Finally register as a time provider */
-    generalTimeRegisterCurrentProvider("NTP", *(int *)pprio, NTPTimeGetCurrent);
+    if (NTPTimePvt.timeProvider) {
+        if (prio == NTP_TIME_DISABLE_TIME_PROVIDER) {
+            /*
+             * The priority is not important if the time provider is
+             * disabled
+             */
+            prio = 100;
+        }
+        generalTimeRegisterCurrentProvider("NTP", prio, NTPTimeGetCurrent);
+    }
 }
 
 void NTPTime_Init(int priority)
@@ -268,6 +280,11 @@ int NTPTime_Report(int level)
     if (onceId == EPICS_THREAD_ONCE_INIT) {
         printf("NTP driver not initialized\n");
     } else if (NTPTimePvt.synchronize) {
+        if (NTPTimePvt.timeProvider) {
+            printf("NTP driver is registered as a time provider\n");
+        } else {
+            printf("NTP directly supported by OS\n");
+        }
         printf("NTP driver %s synchronized with server\n",
             NTPTimePvt.synchronized ? "is" : "is *not*");
         if (NTPTimePvt.syncsFailed) {
